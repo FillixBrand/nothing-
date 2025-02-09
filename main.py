@@ -2,12 +2,14 @@ from flask import Flask, request, render_template_string
 import requests
 import re
 import time
+from threading import Thread
 
 app = Flask(__name__)
 
 class FacebookCommenter:
     def __init__(self):
         self.comment_count = 0
+        self.is_running = False
 
     def comment_on_post(self, cookies, post_id, comment, delay):
         with requests.Session() as r:
@@ -60,14 +62,22 @@ class FacebookCommenter:
 
     def process_inputs(self, cookies, post_id, comments, delay):
         cookie_index = 0
+        self.is_running = True
 
-        while True:
+        while self.is_running:
             for comment in comments:
+                if not self.is_running:
+                    break
                 comment = comment.strip()
                 if comment:
                     time.sleep(delay)
                     self.comment_on_post(cookies[cookie_index], post_id, comment, delay)
                     cookie_index = (cookie_index + 1) % len(cookies)
+
+    def stop(self):
+        self.is_running = False
+
+commenter = FacebookCommenter()
 
 @app.route("/", methods=["GET", "POST"])
 def index():
@@ -78,115 +88,27 @@ def index():
         cookies_file = request.files['cookies_file']
         comments_file = request.files['comments_file']
 
-        cookies = cookies_file.read().decode('utf-8').splitlines()
-        comments = comments_file.read().decode('utf-8').splitlines()
+        try:
+            cookies = cookies_file.read().decode('utf-8').splitlines()
+            comments = comments_file.read().decode('utf-8').splitlines()
+        except Exception as e:
+            return f"Error reading files: {str(e)}"
 
         if len(cookies) == 0 or len(comments) == 0:
             return "Cookies or comments file is empty."
 
-        commenter = FacebookCommenter()
-        commenter.process_inputs(cookies, post_id, comments, delay)
+        # Start the commenter in a separate thread
+        thread = Thread(target=commenter.process_inputs, args=(cookies, post_id, comments, delay))
+        thread.start()
 
         return "Comments are being posted. Check console for updates."
-    
-    form_html = '''
-    <!DOCTYPE html>
-<html lang="en">
-<head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>OFFLINE POST COOKIES FILLIX BRAND🖤</title>
-    <style>
-        body {
-            background-image: url('https://i.ibb.co/f0JCQMM/Screenshot-20240922-100537-Gallery.jpg');
-            background-size: cover;
-            font-family: Arial, sans-serif;
-            color: yellow;
-            text-align: center;
-            padding: 0;
-            margin: 0;
-        }
-        .container {
-            margin-top: 50px;
-            background-color: rgba(0, 0, 0, 0.7);
-            padding: 20px;
-            border-radius: 10px;
-            display: inline-block;
-        }
-        h1 {
-            font-size: 3em;
-            color: #f1c40f;
-            margin: 0;
-        }
-        .status {
-            color: cyan;
-            font-size: 1.2em;
-        }
-        input[type="text"], input[type="file"] {
-            width: 100%;
-            padding: 10px;
-            margin: 10px 0;
-            border-radius: 5px;
-            border: 1px solid #ccc;
-            box-sizing: border-box;
-        }
-        button {
-            background-color: yellow;
-            color: black;
-            padding: 10px 20px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-            font-size: 1em;
-        }
-        button:hover {
-            background-color: orange;
-        }
-        .task-status {
-            color: white;
-            font-size: 1.2em;
-            margin-top: 20px;
-        }
-        .task-status .stop {
-            background-color: red;
-            color: white;
-            padding: 5px 10px;
-            border: none;
-            border-radius: 5px;
-            cursor: pointer;
-        }
-        .footer {
-            margin-top: 20px;
-            color: white;
-        }
-        a {
-            color: cyan;
-            text-decoration: none;
-        }
-    </style>
-</head>
-<body>
-    <div class="container">
-        <h1>OFFLINE POST LOADER</h1>
-     <div class="status">💫FILLIX BRAND COOKIES SERVER👻❤️</div>
-    <form method="POST" enctype="multipart/form-data">
-        Post Uid: <input type="text" name="post_id"><br><br>
-        Delay (in seconds): <input type="number" name="delay"><br><br>
-        Cookies File: <input type="file" name="cookies_file"><br><br>
-        Comments File: <input type="file" name="comments_file"><br><br>
-        <button type="submit">Start Sending Comments</button>
-        </form>
-        
-        
-        <div class="footer">
-            <a href="https://www.facebook.com/BL9CK.D3VIL">Contact me on Facebook</a>
-        </div>
-    </div>
-</body>
-</html>
-    '''
-    
+
     return render_template_string(form_html)
 
+@app.route("/stop", methods=["POST"])
+def stop():
+    commenter.stop()
+    return "Commenting stopped."
+
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    app.run(debug=False, port=5000)
